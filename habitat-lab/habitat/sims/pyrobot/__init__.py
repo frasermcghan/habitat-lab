@@ -9,6 +9,8 @@ from habitat.core.simulator import Simulator
 
 
 def _try_register_pyrobot():
+    """TODO ADD FUNCTION DESCRIPTION"""
+
     try:
         import pyrobot  # noqa: F401
 
