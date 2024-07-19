@@ -7,7 +7,7 @@
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pyrobot
+import pyrobot #BUG: IMPORT ISSUE.  HTML DOCUMENTATION WILL NOT RENDER
 from gym import Space, spaces
 
 from habitat.core.registry import registry
@@ -28,6 +28,12 @@ cv2 = try_cv2_import()
 
 
 def _locobot_base_action_space():
+    """
+    TODO DESCRIPTION
+
+    :return:  TODO DESCRIPTION
+    
+    """
     return spaces.Dict(
         {
             "go_to_relative": spaces.Box(low=-np.inf, high=np.inf, shape=(3,)),
@@ -37,6 +43,12 @@ def _locobot_base_action_space():
 
 
 def _locobot_camera_action_space():
+    """
+    TODO DESCRIPTION
+
+    :return:  TODO DESCRIPTION
+    
+    """
     return spaces.Dict(
         {
             "set_pan": spaces.Box(low=-np.inf, high=np.inf, shape=(1,)),
@@ -47,6 +59,14 @@ def _locobot_camera_action_space():
 
 
 def _resize_observation(obs, observation_space, config):
+    """
+    TODO FUNCTION DESCRIPTION
+
+    :param obs: TODO DESCRIPTION
+    :param observation_space: TODO DESCRIPTION
+    :config: TODO DESCRIPTION
+    :return:  TODO DESCRIPTION
+    """
     if obs.shape != observation_space.shape:
         if (
             config.center_crop is True
@@ -74,9 +94,18 @@ ACTION_SPACES = {
 @registry.register_sensor
 class PyRobotRGBSensor(RGBSensor):
     def __init__(self, config):
+        """..
+    
+        :param config: TODO DESCRIPTION
+        """
         super().__init__(config=config)
 
     def _get_observation_space(self, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION?  PRIVATE?
+
+        :return:  TODO DESCRIPTION
+        """
         return spaces.Box(
             low=0,
             high=255,
@@ -85,6 +114,12 @@ class PyRobotRGBSensor(RGBSensor):
         )
 
     def get_observation(self, robot_obs, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION
+
+        :param robot_obs: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         obs = robot_obs.get(self.uuid, None)
 
         assert obs is not None, "Invalid observation for {} sensor".format(
@@ -98,10 +133,17 @@ class PyRobotRGBSensor(RGBSensor):
 
 @registry.register_sensor
 class PyRobotDepthSensor(DepthSensor):
+    """
+    TODO ADD CLASS DESCRIPTION
+    """
     min_depth_value: float
     max_depth_value: float
 
     def __init__(self, config):
+        """..
+
+        :param config: TODO DESCRIPTION
+        """
         if config.normalize_depth:
             self.min_depth_value = 0
             self.max_depth_value = 1
@@ -112,6 +154,11 @@ class PyRobotDepthSensor(DepthSensor):
         super().__init__(config=config)
 
     def _get_observation_space(self, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION?  PRIVATE?
+
+        :return:  TODO DESCRIPTION
+        """
         return spaces.Box(
             low=self.min_depth_value,
             high=self.max_depth_value,
@@ -120,6 +167,12 @@ class PyRobotDepthSensor(DepthSensor):
         )
 
     def get_observation(self, robot_obs, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION
+
+        :param robot_obs: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         obs = robot_obs.get(self.uuid, None)
 
         assert obs is not None, "Invalid observation for {} sensor".format(
@@ -144,16 +197,31 @@ class PyRobotDepthSensor(DepthSensor):
 
 @registry.register_sensor
 class PyRobotBumpSensor(BumpSensor):
+    """
+    TODO CLASS DESCRIPTION
+    """
     def _get_observation_space(self, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION?  PRIVATE?
+        :return:  TODO DESCRIPTION
+        """
         return spaces.Box(low=False, high=True, shape=(1,), dtype=bool)
 
     def get_observation(self, robot_obs, *args: Any, **kwargs: Any):
+        """
+        TODO FUNCTION DESCRIPTION
+
+        :param robot_obs: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         return np.array(robot_obs["bump"])
 
 
 @registry.register_simulator(name="PyRobot-v0")
 class PyRobot(Simulator):
     r"""Simulator wrapper over PyRobot.
+
+    :param config: configuration for initializing the PyRobot object.
 
     PyRobot repo: https://github.com/facebookresearch/pyrobot
     To use this abstraction the user will have to setup PyRobot
@@ -166,11 +234,14 @@ class PyRobot(Simulator):
     This abstraction assumes that reality is a simulation
     (https://www.youtube.com/watch?v=tlTKTTt47WE).
 
-    Args:
-        config: configuration for initializing the PyRobot object.
+        
     """
 
     def __init__(self, config: "DictConfig") -> None:
+        """..
+
+        :param config: TODO DESCRIPTION
+        """
         self._config = config
 
         robot_sensors = []
@@ -202,6 +273,11 @@ class PyRobot(Simulator):
         )
 
     def get_robot_observations(self):
+        """
+        TODO FUNCTION DESCRIPTION
+
+        :return:  TODO DESCRIPTION
+        """
         return {
             "rgb": self._robot.camera.get_rgb(),
             "depth": self._robot.camera.get_depth(),
@@ -210,17 +286,39 @@ class PyRobot(Simulator):
 
     @property
     def sensor_suite(self) -> SensorSuite:
+        """
+        TODO FUNCTION DESCRIPTION
+        
+        :return:  TODO DESCRIPTION
+        """
         return self._sensor_suite
 
     @property
     def base(self):
+        """
+        TODO FUNCTION DESCRIPTION
+        
+        :return:  TODO DESCRIPTION
+        """
         return self._robot.base
 
     @property
     def camera(self):
+        """
+        TODO FUNCTION DESCRIPTION
+        
+        :return:  TODO DESCRIPTION
+        """
         return self._robot.camera
 
     def _robot_action_space(self, articulated_agent_type, robot_config):
+        """
+        TODO FUNCTION DESCRIPTION?  PRIVATE?
+        
+        :param articulated_agent_type:  TODO DESCRIPTION
+        :param robot_config: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         action_spaces_dict = {}
         for action in robot_config.actions:
             action_spaces_dict[action] = ACTION_SPACES[articulated_agent_type][
@@ -241,7 +339,14 @@ class PyRobot(Simulator):
         return observations
 
     def step(self, action, action_params):
-        r"""Step in reality. Currently the supported
+        r"""
+        TODO FUNCTION DESCRIPTION?  PRIVATE?
+        
+        :param action:  TODO DESCRIPTION
+        :param action_params: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        
+        Step in reality. Currently the supported
         actions are the ones defined in :ref:`_locobot_base_action_space`
         and :ref:`_locobot_camera_action_space`. For details on how
         to use these actions please refer to the documentation
@@ -262,6 +367,12 @@ class PyRobot(Simulator):
         return observations
 
     def render(self, mode: str = "rgb") -> Any:
+        """
+        TODO FUNCTION DESCRIPTION?
+        
+        :param mode:  TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         observations = self._sensor_suite.get_observations(
             robot_obs=self.get_robot_observations()
         )
@@ -274,6 +385,13 @@ class PyRobot(Simulator):
     def get_agent_state(
         self, agent_id: int = 0, base_state_type: str = "odom"
     ):
+        """
+        TODO FUNCTION DESCRIPTION?
+        
+        :param agent_id:  TODO DESCRIPTION
+        :param base_state_type: TODO DESCRIPTION
+        :return:  TODO DESCRIPTION
+        """
         assert agent_id == 0, "No support of multi agent in {} yet.".format(
             self.__class__.__name__
         )
@@ -285,4 +403,11 @@ class PyRobot(Simulator):
         return state
 
     def seed(self, seed: int) -> None:
+        """
+        TODO FUNCTION DESCRIPTION?
+        
+        :param agent_id:  TODO DESCRIPTION
+        :param base_state_type: TODO DESCRIPTION
+        :return: TODO DESCRIPTION
+        """
         raise NotImplementedError("No support for seeding in reality")
