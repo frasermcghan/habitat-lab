@@ -27,12 +27,12 @@ habitat:
 habitat_baselines:
   verbose: True
   trainer_name: "ddppo"
-  tensorboard_dir: "/mnt/tb/orbslam_baseline_default_reward"
-  video_dir: "/mnt/video_dir/finetuned"
+  tensorboard_dir: "/mnt/tb/orbslam-finetuned"
+  video_dir: "/mnt/video_dir/orbslam-finetuned"
   test_episode_count: -1
-  eval_ckpt_path_dir: "/mnt/checkpoints/orbslam_baseline_finetuned/latest.pth"
+  eval_ckpt_path_dir: "/mnt/model-weights/orbslam-finetuned.pth"
   num_environments: 8
-  checkpoint_folder: "/mnt/checkpoints/orbslam_baseline_finetuned"
+  checkpoint_folder: "/mnt/checkpoints/orbslam-finetuned"
   total_num_steps: 10e6
   num_updates: -1
   log_interval: 1
@@ -69,7 +69,7 @@ habitat_baselines:
     ddppo:
       sync_frac: 0.6
       distrib_backend: GLOO
-      pretrained_weights: /mnt/ddppo_models/gibson-4plus-resnet50.pth
+      pretrained_weights: /mnt/model-weights/gibson-4plus-resnet50.pth
       pretrained: False
       pretrained_encoder: True
       train_encoder: False

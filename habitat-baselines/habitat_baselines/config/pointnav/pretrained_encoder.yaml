@@ -17,23 +17,21 @@ habitat:
 habitat_baselines:
   verbose: True
   trainer_name: "ddppo"
-  tensorboard_dir: "/mnt/tb/oracle_ent_01"
-  video_dir: "/mnt/video_dir/pretrained_encoder_zero_shot"
+  tensorboard_dir: "/mnt/tb/oracle"
+  video_dir: "/mnt/video_dir/oracle"
   test_episode_count: -1
-  eval_ckpt_path_dir: "/mnt/checkpoints/pretrained_encoder_recent/latest.pth"
+  eval_ckpt_path_dir: "/mnt/model-weights/oracle.pth"
   num_environments: 8
-  checkpoint_folder: "/mnt/checkpoints/pretrained_encoder_recent"
+  checkpoint_folder: "/mnt/checkpoints/oracle"
   total_num_steps: 10e6
   num_checkpoints: 100
   num_updates: -1
   log_interval: 1
   force_torch_single_threaded: True
-  # load_resume_state_config: True
   load_resume_state_config: False
 
   eval:
     video_option: ["disk"]
-    # video_option: []
 
   rl:
     preemption:
@@ -61,7 +59,7 @@ habitat_baselines:
     ddppo:
       sync_frac: 0.6
       distrib_backend: NCCL
-      pretrained_weights: /mnt/ddppo_models/gibson-4plus-resnet50.pth
+      pretrained_weights: /mnt/model-weights/gibson-4plus-resnet50.pth
       pretrained: False
       pretrained_encoder: True
       train_encoder: False
