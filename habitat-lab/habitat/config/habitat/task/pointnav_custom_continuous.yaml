@@ -1,10 +1,7 @@
 defaults:
   - task_config_base
   - actions:
-    - stop
-    - move_forward
-    - turn_left
-    - turn_right
+    - velocity_control
   - measurements:
     - distance_to_goal
     - success
@@ -13,7 +10,9 @@ defaults:
     - soft_success
     - collisions
     - distance_to_goal_reward
+    - top_down_map
   - lab_sensors:
+    - pointgoal_with_gps_compass_sensor
     - pointgoal_with_gps_compass_sensor_transformed
   - _self_
 
@@ -22,3 +21,8 @@ end_on_success: True
 reward_measure: "distance_to_goal_reward"
 success_measure: "success"
 goal_sensor_uuid: pointgoal_with_gps_compass_transformed
+actions:
+  velocity_control:
+    time_step: 0.1
+    lin_vel_range: [0.0, 0.25]
+    ang_vel_range: [-30, 30]
