@@ -1,0 +1,41 @@
+# @package _global_
+
+defaults:
+  - pointnav_base
+  - /habitat/dataset/pointnav: gibson
+  - override /habitat/task: pointnav_custom_continuous
+  - override /habitat/simulator/agents@habitat.simulator.agents.main_agent: depth_agent
+  - _self_
+
+habitat:
+  dataset:
+    split: train
+    data_path: /mnt/habitat_datasets/datasets/pointnav/gibson/v2/{split}/{split}.json.gz
+    scenes_dir: /mnt/habitat_datasets/scene_datasets/
+  environment:
+    iterator_options:
+      shuffle: True
+      group_by_scene: True
+    max_episode_steps: 5000
+  simulator:
+    habitat_sim_v0:
+      gpu_device_id: 0
+      allow_sliding: True
+    agents:
+      main_agent:
+        height: 0.61
+        radius: 0.175
+        sim_sensors:
+          depth_sensor:
+            hfov: 90
+            width: 256
+            height: 256
+  task:
+    slack_reward: 0.0
+    success_reward: 10.0
+    reward_measure: "distance_to_goal_reward"
+    goal_sensor_uuid: pointgoal_with_gps_compass
+  gym:
+    obs_keys:
+      - depth
+      - pointgoal_with_gps_compass

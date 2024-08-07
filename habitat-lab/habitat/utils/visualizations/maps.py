@@ -40,10 +40,9 @@ MAP_TARGET_POINT_INDICATOR = 6
 MAP_SHORTEST_PATH_COLOR = 7
 MAP_VIEW_POINT_INDICATOR = 8
 MAP_TARGET_BOUNDING_BOX = 9
+MAP_LOCALIZATION_PATH = 10
+MAP_TRUE_PATH = 11
 TOP_DOWN_MAP_COLORS = np.full((256, 3), 150, dtype=np.uint8)
-TOP_DOWN_MAP_COLORS[10:] = cv2.applyColorMap(
-    np.arange(246, dtype=np.uint8), cv2.COLORMAP_JET
-).squeeze(1)[:, ::-1]
 TOP_DOWN_MAP_COLORS[MAP_INVALID_POINT] = [255, 255, 255]  # White
 TOP_DOWN_MAP_COLORS[MAP_VALID_POINT] = [150, 150, 150]  # Light Grey
 TOP_DOWN_MAP_COLORS[MAP_BORDER_INDICATOR] = [50, 50, 50]  # Grey
@@ -52,6 +51,8 @@ TOP_DOWN_MAP_COLORS[MAP_TARGET_POINT_INDICATOR] = [200, 0, 0]  # Red
 TOP_DOWN_MAP_COLORS[MAP_SHORTEST_PATH_COLOR] = [0, 200, 0]  # Green
 TOP_DOWN_MAP_COLORS[MAP_VIEW_POINT_INDICATOR] = [245, 150, 150]  # Light Red
 TOP_DOWN_MAP_COLORS[MAP_TARGET_BOUNDING_BOX] = [0, 175, 0]  # Green
+TOP_DOWN_MAP_COLORS[MAP_LOCALIZATION_PATH] = [255, 255, 0]  # Yellow
+TOP_DOWN_MAP_COLORS[MAP_TRUE_PATH] = [0, 0, 255]  # Blue
 
 
 def draw_agent(
@@ -423,6 +424,15 @@ def colorize_draw_agent_and_fit_to_height(
             agent_rotation=map_agent_angle,
             agent_radius_px=min(top_down_map.shape[0:2]) // 32,
         )
+        if "orbslam_map_coord" in topdown_map_info:
+            map_orbslam_pos = topdown_map_info["orbslam_map_coord"][agent_idx]
+            map_orbslam_angle = topdown_map_info["orbslam_angle"][agent_idx]
+            top_down_map = draw_agent(
+                image=top_down_map,
+                agent_center_coord=map_orbslam_pos,
+                agent_rotation=map_orbslam_angle,
+                agent_radius_px=min(top_down_map.shape[0:2]) // 32,
+            )
 
     if top_down_map.shape[0] > top_down_map.shape[1]:
         top_down_map = np.rot90(top_down_map, 1)

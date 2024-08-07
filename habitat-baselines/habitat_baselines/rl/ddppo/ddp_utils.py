@@ -28,6 +28,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 from torch import distributed as distrib
+import datetime
 
 from habitat import logger
 
@@ -303,7 +304,11 @@ def init_distrib_slurm(
         main_addr, main_port, world_size, world_rank == 0
     )
     distrib.init_process_group(
-        backend, store=tcp_store, rank=world_rank, world_size=world_size
+        backend,
+        store=tcp_store,
+        rank=world_rank,
+        world_size=world_size,
+        timeout=datetime.timedelta(seconds=100000),
     )
 
     return local_rank, tcp_store

@@ -354,6 +354,22 @@ class PointGoalWithGPSCompassSensorConfig(PointGoalSensorConfig):
 
 
 @dataclass
+class PointGoalWithGPSCompassSensorTransformedConfig(PointGoalSensorConfig):
+    """
+    Indicates the position of the point goal in the frame of reference of the robot.
+    """
+
+    type: str = "PointGoalWithGPSCompassSensorTransformed"
+
+
+@dataclass
+class ORBSLAMPointGoalWithGPSCompassSensorTransformedConfig(
+    PointGoalSensorConfig
+):
+    type: str = "ORBSLAMPointGoalWithGPSCompassSensorTransformed"
+
+
+@dataclass
 class ObjectGoalSensorConfig(LabSensorConfig):
     r"""
     For Object Navigation tasks only. Generates a discrete observation containing
@@ -622,6 +638,12 @@ class SuccessMeasurementConfig(MeasurementConfig):
 
 
 @dataclass
+class SoftSuccessMeasurementConfig(MeasurementConfig):
+    type: str = "SoftSuccess"
+    success_distance: float = 0.2
+
+
+@dataclass
 class SPLMeasurementConfig(MeasurementConfig):
     r"""
     For Navigation tasks only, Measures the SPL (Success weighted by Path Length)
@@ -653,6 +675,33 @@ class FogOfWarConfig:
 
 
 @dataclass
+class ORBSLAMStateMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMState"
+    vocabulary_file: str = (
+        "orb_vocabulary.txt"
+    )
+    settings_file: str = (
+        "orb_settings.yaml"
+    )
+    show_vis: bool = False
+
+
+@dataclass
+class ORBSLAMPositionErrorMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMPositionError"
+
+
+@dataclass
+class ORBSLAMRotationErrorMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMRotationError"
+
+
+@dataclass
+class ORBSLAMPoseErrorMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMPoseError"
+
+
+@dataclass
 class TopDownMapMeasurementConfig(MeasurementConfig):
     type: str = "TopDownMap"
     max_episode_steps: int = (
@@ -668,6 +717,11 @@ class TopDownMapMeasurementConfig(MeasurementConfig):
     # axes aligned bounding boxes
     draw_goal_aabbs: bool = True
     fog_of_war: FogOfWarConfig = FogOfWarConfig()
+
+
+@dataclass
+class ORBSLAMTopDownMapMeasurementConfig(TopDownMapMeasurementConfig):
+    type: str = "ORBSLAMTopDownMap"
 
 
 @dataclass
@@ -1060,6 +1114,32 @@ class DistanceToGoalRewardMeasurementConfig(MeasurementConfig):
 
 
 @dataclass
+class LocalizationAwareDistanceToGoalRewardMeasurementConfig(
+    MeasurementConfig
+):
+    type: str = "LocalizationAwareDistanceToGoalReward"
+
+
+@dataclass
+class ORBSLAMLoopClosureRewardMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMLoopClosureReward"
+    loop_closure_reward_weight: float = 1.0
+
+
+@dataclass
+class EarlyStoppingPenaltyMeasurementConfig(MeasurementConfig):
+    type: str = "EarlyStoppingPenalty"
+    prevent_termination: bool = False
+    penalty: float = -1.0
+
+
+@dataclass
+class ORBSLAMLocalizationRewardMeasurementConfig(MeasurementConfig):
+    type: str = "ORBSLAMLocalizationReward"
+    localization_reward_weight: float = 1.0
+
+
+@dataclass
 class AnswerAccuracyMeasurementConfig(MeasurementConfig):
     type: str = "AnswerAccuracy"
 
@@ -1125,6 +1205,9 @@ class TaskConfig(HabitatBaseConfig):
     num_spawn_attempts: int = 200
     spawn_max_dist_to_obj: float = 2.0
     base_angle_noise: float = 0.523599
+    # Factor to shrink the receptacle sampling volume when predicates place
+    # objects on top of receptacles.
+    recep_place_shrink_factor: float = 0.8
     # EE sample parameters
     ee_sample_factor: float = 0.2
     ee_exclude_region: float = 0.0
@@ -1149,7 +1232,6 @@ class TaskConfig(HabitatBaseConfig):
     enable_safe_drop: bool = False
     art_succ_thresh: float = 0.15
     robot_at_thresh: float = 2.0
-    filter_nav_to_tasks: List = field(default_factory=list)
     actions: Dict[str, ActionConfig] = MISSING
 
 
@@ -1322,6 +1404,20 @@ class AgentConfig(HabitatBaseConfig):
 
 
 @dataclass
+class RendererConfig(HabitatBaseConfig):
+    r"""Configuration for the renderer.
+
+    :property enable_batch_renderer: [Experimental] Enables batch rendering, which accelerates rendering for concurrent environments. See env_batch_renderer.py for details.
+    :property composite_files: List of composite GLTF files to be pre-loaded by the batch renderer.
+    :property classic_replay_renderer: For debugging. Create a ClassicReplayRenderer instead of BatchReplayRenderer when enable_batch_renderer is active.
+    """
+
+    enable_batch_renderer: bool = False
+    composite_files: Optional[List[str]] = None
+    classic_replay_renderer: bool = False
+
+
+@dataclass
 class HabitatSimV0Config(HabitatBaseConfig):
     gpu_device_id: int = 0
     # Use Habitat-Sim's GPU->GPU copy mode to return rendering results in
@@ -1401,6 +1497,8 @@ class SimulatorConfig(HabitatBaseConfig):
     ep_info: Optional[Any] = None
     # The offset id values for the object
     object_ids_start: int = 100
+    # Configuration for rendering
+    renderer: RendererConfig = RendererConfig()
 
 
 @dataclass
@@ -1755,10 +1853,28 @@ cs.store(
     node=CompassSensorConfig,
 )
 cs.store(
+    package="habitat.task.lab_sensors.pointgoal_sensor",
+    group="habitat/task/lab_sensors",
+    name="pointgoal_sensor",
+    node=PointGoalSensorConfig,
+)
+cs.store(
     package="habitat.task.lab_sensors.pointgoal_with_gps_compass_sensor",
     group="habitat/task/lab_sensors",
     name="pointgoal_with_gps_compass_sensor",
     node=PointGoalWithGPSCompassSensorConfig,
+)
+cs.store(
+    package="habitat.task.lab_sensors.pointgoal_with_gps_compass_sensor_transformed",
+    group="habitat/task/lab_sensors",
+    name="pointgoal_with_gps_compass_sensor_transformed",
+    node=PointGoalWithGPSCompassSensorTransformedConfig,
+)
+cs.store(
+    package="habitat.task.lab_sensors.orbslam_pointgoal_with_gps_compass_sensor_transformed",
+    group="habitat/task/lab_sensors",
+    name="orbslam_pointgoal_with_gps_compass_sensor_transformed",
+    node=ORBSLAMPointGoalWithGPSCompassSensorTransformedConfig,
 )
 cs.store(
     package="habitat.task.lab_sensors.objectgoal_sensor",
@@ -1813,6 +1929,12 @@ cs.store(
     group="habitat/task/lab_sensors",
     name="abs_goal_sensor",
     node=AbsGoalSensorConfig,
+)
+cs.store(
+    package="habitat.task.lab_sensors.proximity_sensor",
+    group="habitat/task/lab_sensors",
+    name="proximity_sensor",
+    node=ProximitySensorConfig,
 )
 cs.store(
     package="habitat.task.lab_sensors.joint_sensor",
@@ -1896,6 +2018,36 @@ cs.store(
 
 # Task Measurements
 cs.store(
+    package="habitat.task.measurements.orbslam_state",
+    group="habitat/task/measurements",
+    name="orbslam_state",
+    node=ORBSLAMStateMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_position_error",
+    group="habitat/task/measurements",
+    name="orbslam_position_error",
+    node=ORBSLAMPositionErrorMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_rotation_error",
+    group="habitat/task/measurements",
+    name="orbslam_rotation_error",
+    node=ORBSLAMRotationErrorMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_pose_error",
+    group="habitat/task/measurements",
+    name="orbslam_pose_error",
+    node=ORBSLAMPoseErrorMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_top_down_map",
+    group="habitat/task/measurements",
+    name="orbslam_top_down_map",
+    node=ORBSLAMTopDownMapMeasurementConfig,
+)
+cs.store(
     package="habitat.task.measurements.top_down_map",
     group="habitat/task/measurements",
     name="top_down_map",
@@ -1914,10 +2066,40 @@ cs.store(
     node=DistanceToGoalRewardMeasurementConfig,
 )
 cs.store(
+    package="habitat.task.measurements.localization_aware_distance_to_goal_reward",
+    group="habitat/task/measurements",
+    name="localization_aware_distance_to_goal_reward",
+    node=LocalizationAwareDistanceToGoalRewardMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_loop_closure_reward",
+    group="habitat/task/measurements",
+    name="orbslam_loop_closure_reward",
+    node=ORBSLAMLoopClosureRewardMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.early_stopping_penalty",
+    group="habitat/task/measurements",
+    name="early_stopping_penalty",
+    node=EarlyStoppingPenaltyMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.orbslam_localization_reward",
+    group="habitat/task/measurements",
+    name="orbslam_localization_reward",
+    node=ORBSLAMLocalizationRewardMeasurementConfig,
+)
+cs.store(
     package="habitat.task.measurements.success",
     group="habitat/task/measurements",
     name="success",
     node=SuccessMeasurementConfig,
+)
+cs.store(
+    package="habitat.task.measurements.soft_success",
+    group="habitat/task/measurements",
+    name="soft_success",
+    node=SoftSuccessMeasurementConfig,
 )
 cs.store(
     package="habitat.task.measurements.spl",

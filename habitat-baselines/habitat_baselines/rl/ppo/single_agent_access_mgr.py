@@ -78,9 +78,11 @@ class SingleAgentAccessMgr(AgentAccessMgr):
                 lr_lambda=lambda _: lr_schedule_fn(self._percent_done_fn()),
             )
         if resume_state is not None:
-            self._updater.load_state_dict(resume_state["state_dict"])
-            self._updater.optimizer.load_state_dict(
-                resume_state["optim_state"]
+            self._updater.load_state_dict(
+                {
+                    "actor_critic." + k: v
+                    for k, v, in resume_state["state_dict"].items()
+                }
             )
         self._policy_action_space = self._actor_critic.get_policy_action_space(
             self._env_spec.action_space
@@ -197,7 +199,7 @@ class SingleAgentAccessMgr(AgentAccessMgr):
             "optim_state": self._updater.optimizer.state_dict(),
         }
         if self._lr_scheduler is not None:
-            ret["lr_sched_state"] = (self._lr_scheduler.state_dict(),)
+            ret["lr_sched_state"] = self._lr_scheduler.state_dict()
         return ret
 
     def get_save_state(self):
@@ -217,9 +219,10 @@ class SingleAgentAccessMgr(AgentAccessMgr):
         self._actor_critic.load_state_dict(state["state_dict"])
         if self._updater is not None:
             if "optim_state" in state:
-                self._actor_critic.load_state_dict(state["optim_state"])
+                self._updater.optimizer.load_state_dict(state["optim_state"])
+        if self._lr_scheduler is not None:
             if "lr_sched_state" in state:
-                self._actor_critic.load_state_dict(state["lr_sched_state"])
+                self._lr_scheduler.load_state_dict(state["lr_sched_state"])
 
     @property
     def hidden_state_shape(self):

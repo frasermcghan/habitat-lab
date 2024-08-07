@@ -15,6 +15,7 @@ from habitat.config.default import _HABITAT_CFG_DIR, register_configs
 from habitat.config.default_structured_configs import (
     SimulatorSensorConfig,
     ThirdRGBSensorConfig,
+    ThirdDepthSensorConfig
 )
 from habitat.core.environments import get_env_class
 from habitat.utils.env_utils import make_env_fn
@@ -47,10 +48,13 @@ def _get_env_name(cfg: "DictConfig") -> Optional[str]:
     return cfg["env_task"]
 
 
-def make_gym_from_config(config: "DictConfig") -> gym.Env:
+def make_gym_from_config(config: "DictConfig", use_render_mode=False) -> gym.Env:
     """
     From a habitat-lab or habitat-baseline config, create the associated gym environment.
     """
+    if use_render_mode:
+        _add_sim_sensor_to_config(config, ThirdRGBSensorConfig(position=[0, 0.61, 0], orientation=config.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor.orientation))
+
     if "habitat" in config:
         config = config.habitat
     env_class_name = _get_env_name(config)

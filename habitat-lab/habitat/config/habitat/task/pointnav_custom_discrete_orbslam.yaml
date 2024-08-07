@@ -1,0 +1,32 @@
+defaults:
+  - task_config_base
+  - actions:
+    - stop
+    - move_forward
+    - turn_left
+    - turn_right
+  - measurements:
+    - distance_to_goal
+    - success
+    - spl
+    - soft_spl
+    - soft_success
+    - collisions
+    - distance_to_goal_reward
+    - orbslam_state
+    - orbslam_position_error
+    - orbslam_rotation_error
+    - orbslam_pose_error
+    - orbslam_localization_reward
+    - orbslam_loop_closure_reward
+    - localization_aware_distance_to_goal_reward
+  - lab_sensors:
+    - pointgoal_with_gps_compass_sensor_transformed
+    - orbslam_pointgoal_with_gps_compass_sensor_transformed
+  - _self_
+
+type: Nav-v0
+end_on_success: True
+reward_measure: "distance_to_goal_reward"
+success_measure: "success"
+goal_sensor_uuid: pointgoal_with_gps_compass_transformed

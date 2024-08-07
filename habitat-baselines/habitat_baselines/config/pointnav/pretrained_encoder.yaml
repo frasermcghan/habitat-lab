@@ -1,0 +1,72 @@
+# @package _global_
+
+# Hyperparameters and ResNet18 from on https://arxiv.org/abs/2012.0611
+
+defaults:
+  # - /benchmark/nav/pointnav: pointnav_pretrained
+  - /benchmark/nav/pointnav: pointnav_pretrained_orbslam
+  - /habitat_baselines: habitat_baselines_rl_config_base
+  - _self_
+
+habitat:
+  env_task: LocNavEnv
+  task:
+    success_reward: 10.0
+    slack_reward: 0.0
+
+habitat_baselines:
+  verbose: True
+  trainer_name: "ddppo"
+  tensorboard_dir: "/mnt/tb/oracle_ent_01"
+  video_dir: "/mnt/video_dir/pretrained_encoder_zero_shot"
+  test_episode_count: -1
+  eval_ckpt_path_dir: "/mnt/checkpoints/pretrained_encoder_recent/latest.pth"
+  num_environments: 8
+  checkpoint_folder: "/mnt/checkpoints/pretrained_encoder_recent"
+  total_num_steps: 10e6
+  num_checkpoints: 100
+  num_updates: -1
+  log_interval: 1
+  force_torch_single_threaded: True
+  # load_resume_state_config: True
+  load_resume_state_config: False
+
+  eval:
+    video_option: ["disk"]
+    # video_option: []
+
+  rl:
+    preemption:
+      save_resume_state_interval: 1
+    ppo:
+      clip_param: 0.2
+      ppo_epoch: 2
+      num_mini_batch: 2
+      value_loss_coef: 0.5
+      entropy_coef: 0.1
+      lr: 2.5e-4
+      eps: 1e-5
+      max_grad_norm: 0.2
+      num_steps: 128
+      use_gae: True
+      gamma: 0.99
+      tau: 0.95
+      use_linear_clip_decay: False
+      use_linear_lr_decay: False
+      reward_window_size: 50
+      use_normalized_advantage: False
+      hidden_size: 512
+      use_double_buffered_sampler: True
+
+    ddppo:
+      sync_frac: 0.6
+      distrib_backend: NCCL
+      pretrained_weights: /mnt/ddppo_models/gibson-4plus-resnet50.pth
+      pretrained: False
+      pretrained_encoder: True
+      train_encoder: False
+      reset_critic: True
+
+      backbone: resnet50
+      rnn_type: LSTM
+      num_recurrent_layers: 2

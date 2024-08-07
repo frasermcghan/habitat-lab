@@ -6,13 +6,23 @@
 
 # TODO, lots of typing errors in here
 
+import time
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple, Union
 
 import attr
 import numpy as np
+import orbslam2
 import quaternion
 from gym import spaces
+import torch
+import torch.nn as nn
+from scipy.spatial.transform import Rotation
 
+import habitat_sim
+from habitat.utils.geometry_utils import (
+    quaternion_from_coeff,
+    angle_between_quaternions,
+)
 from habitat.config import read_write
 from habitat.config.default import get_agent_config
 from habitat.core.dataset import Dataset, Episode
@@ -55,6 +65,8 @@ except ImportError:
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
+from math import ceil, floor
+import matplotlib.pyplot as plt
 
 
 cv2 = try_cv2_import()
@@ -326,6 +338,74 @@ class IntegratedPointGoalGPSAndCompassSensor(PointGoalSensor):
         )
 
 
+@registry.register_sensor(name="PointGoalWithGPSCompassSensorTransformed")
+class IntegratedPointGoalGPSAndCompassSensorTransformed(PointGoalSensor):
+    """
+    PointGoal sensor but returns d, cos(theta), sin(theta) as in paper.
+    """
+
+    cls_uuid: str = "pointgoal_with_gps_compass_transformed"
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        sensor_shape = (3,)
+
+        return spaces.Box(
+            low=np.finfo(np.float32).min,
+            high=np.finfo(np.float32).max,
+            shape=sensor_shape,
+            dtype=np.float32,
+        )
+
+    def get_observation(
+        self, observations, episode, *args: Any, **kwargs: Any
+    ):
+        agent_state = self._sim.get_agent_state()
+        agent_position = agent_state.position
+        rotation_world_agent = agent_state.rotation
+        goal_position = np.array(episode.goals[0].position, dtype=np.float32)
+
+        pointgoal = self._compute_pointgoal(
+            agent_position, rotation_world_agent, goal_position
+        )
+        return np.array(
+            [pointgoal[0], np.cos(pointgoal[1]), np.sin(pointgoal[1])]
+        )
+
+
+@registry.register_sensor(
+    name="ORBSLAMPointGoalWithGPSCompassSensorTransformed"
+)
+class ORBSLAMIntegratedPointGoalGPSAndCompassSensorTransformed(
+    IntegratedPointGoalGPSAndCompassSensorTransformed
+):
+    cls_uuid: str = "orbslam_pointgoal_with_gps_compass_transformed"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        super().__init__(sim, config, *args, **kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def get_observation(
+        self, observations, episode, task, *args: Any, **kwargs: Any
+    ):
+        orbslam_state = task.measurements.measures[
+            ORBSLAMState.cls_uuid
+        ].get_metric()
+        goal_position = np.array(episode.goals[0].position, dtype=np.float32)
+        pointgoal = self._compute_pointgoal(
+            orbslam_state["position"],
+            quaternion.from_float_array(orbslam_state["rotation"]),
+            goal_position,
+        )
+        return pointgoal
+
+
 @registry.register_sensor
 class HeadingSensor(Sensor):
     r"""Sensor for observing the agent's heading in the global coordinate
@@ -526,7 +606,9 @@ class Success(Measure):
         task.measurements.check_measure_dependencies(
             self.uuid, [DistanceToGoal.cls_uuid]
         )
-        self.update_metric(episode=episode, task=task, *args, **kwargs)  # type: ignore
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
 
     def update_metric(
         self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
@@ -611,6 +693,34 @@ class SPL(Measure):
 
 
 @registry.register_measure
+class SoftSuccess(Success):
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return "soft_success"
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [DistanceToGoal.cls_uuid]
+        )
+        self._start_end_episode_distance = task.measurements.measures[
+            DistanceToGoal.cls_uuid
+        ].get_metric()
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
+
+    def update_metric(self, episode, task, *args: Any, **kwargs: Any):
+        distance_to_target = task.measurements.measures[
+            DistanceToGoal.cls_uuid
+        ].get_metric()
+
+        ep_soft_success = max(
+            0, (1 - distance_to_target / self._start_end_episode_distance)
+        )
+
+        self._metric = ep_soft_success
+
+
+@registry.register_measure
 class SoftSPL(SPL):
     r"""Soft SPL
 
@@ -631,7 +741,9 @@ class SoftSPL(SPL):
         self._start_end_episode_distance = task.measurements.measures[
             DistanceToGoal.cls_uuid
         ].get_metric()
-        self.update_metric(episode=episode, task=task, *args, **kwargs)  # type: ignore
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
 
     def update_metric(self, episode, task, *args: Any, **kwargs: Any):
         current_position = self._sim.get_agent_state().position
@@ -659,6 +771,8 @@ class SoftSPL(SPL):
 
 @registry.register_measure
 class Collisions(Measure):
+    cls_uuid: str = "collisions"
+
     def __init__(self, sim, config, *args: Any, **kwargs: Any):
         self._sim = sim
         self._config = config
@@ -675,6 +789,591 @@ class Collisions(Measure):
         if self._sim.previous_step_collided:
             self._metric["count"] += 1
             self._metric["is_collision"] = True
+
+
+# @registry.register_measure
+# class CLIPVO(Measure):
+#     cls_uuid: str = "clip_vo"
+
+#     def __init__(
+#         self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+#     ):
+#         super().__init__(**kwargs)
+#         self._sim = sim
+
+#         self.clip_vo_model = orbslam2.System(
+#             config.vocabulary_file,
+#             config.settings_file,
+#             orbslam2.System.RGBD,
+#             config.show_vis,
+#         )
+#         self._metric = {
+#             "position": [0, 0, 0],
+#             "rotation": [1, 0, 0, 0],
+#         }
+
+#     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+#         return self.cls_uuid
+
+#     def reset_metric(self, episode, *args: Any, **kwargs: Any):
+#         self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+#     def update_metric(
+#         self, task, episode: NavigationEpisode, *args: Any, **kwargs: Any
+#     ):
+#         agent_obs = self._sim.get_observations_at()
+#         rgb = agent_obs["rgb"]
+#         depth = agent_obs["depth"] * 10
+#         # mono = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+#         depth = np.squeeze(depth, axis=-1)
+
+#         current_frame = np.concatenate((rgb, depth), axis=2)
+#         clip_vo_position, clip_vo_orientation = self.clip_vo_model(
+#             current_frame, self.previous_frame
+#         )
+#         self._metric = {
+#             "position": clip_vo_position,
+#             "rotation": clip_vo_orientation,
+#         }
+#         self.previous_frame = current_frame
+
+
+@registry.register_measure
+class ORBSLAMState(Measure):
+    cls_uuid: str = "orbslam_state"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        super().__init__(**kwargs)
+        self.slam = orbslam2.System(
+            config.vocabulary_file,
+            config.settings_file,
+            orbslam2.System.RGBD,
+            config.show_vis,
+        )
+        self._sim = sim
+        self._metric = {
+            "position": [0, 0, 0],
+            "rotation": [1, 0, 0, 0],
+            "tracking_state": self.slam.GetTrackingState(),
+            "map_changed": self.slam.MapChanged(),
+        }
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, *args: Any, **kwargs: Any):
+        self.slam_to_habitat_origin = None
+        self.slam.Reset()
+        self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+    def update_metric(
+        self, task, episode: NavigationEpisode, *args: Any, **kwargs: Any
+    ):
+        agent_state = self._sim.get_agent_state()
+        agent_position = agent_state.position
+        agent_rotation = agent_state.rotation
+        agent_obs = self._sim.get_observations_at(
+            agent_position, agent_rotation
+        )
+        agent_rotation = agent_state.sensor_states["rgb"].rotation
+
+        agent_pose = np.eye(4)
+        agent_pose[0:3, -1] = np.array(agent_position)
+        agent_pose[0:3, 0:3] = quaternion.as_rotation_matrix(agent_rotation)
+
+        rgb = agent_obs["rgb"]
+        depth = agent_obs["depth"] * 10
+        mono = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        depth = np.squeeze(depth, axis=-1)
+
+        slam_pose = self.slam.TrackRGBD(mono, depth, time.time())
+        slam_state = self.slam.GetTrackingState()
+        map_changed = self.slam.MapChanged()
+
+        slam_trajectory = self.slam.GetTrajectory()
+        if len(slam_trajectory) > 0:
+            slam_pose = slam_trajectory[-1]
+
+        rot_180_x = np.eye(4)
+        rot_180_x[0:3, 0:3] = np.array(
+            [
+                [1, 0, 0],
+                [0, np.cos(np.pi), -np.sin(np.pi)],
+                [0, np.sin(np.pi), np.cos(np.pi)],
+            ]
+        )
+
+        # convert from opencv to opengl convention
+        slam_pose_opengl = slam_pose @ rot_180_x
+
+        # calculate transformation to align origins
+        if self.slam_to_habitat_origin is None:
+            self.slam_to_habitat_origin = agent_pose @ np.linalg.inv(
+                slam_pose_opengl
+            )
+
+        # align slam with habitat
+        slam_pose_habitat = self.slam_to_habitat_origin @ slam_pose_opengl
+
+        slam_position_habitat = slam_pose_habitat[0:3, -1]
+        slam_rotation_habitat = quaternion.from_rotation_matrix(
+            slam_pose_habitat[0:3, 0:3]
+        )
+
+        self._metric = {
+            "position": slam_position_habitat,
+            "rotation": quaternion.as_float_array(slam_rotation_habitat),
+            "tracking_state": slam_state,
+            "map_changed": map_changed,
+        }
+
+
+@registry.register_measure
+class ORBSLAMPositionError(Measure):
+    cls_uuid: str = "orbslam_position_error"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        super().__init__(**kwargs)
+        self._sim = sim
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMState.cls_uuid]
+        )
+        self.update_metric(episode=episode, task=task, *args, **kwargs)
+
+    def update_metric(
+        self, episode: NavigationEpisode, task, *args: Any, **kwargs: Any
+    ):
+        orbslam_state = task.measurements.measures[
+            ORBSLAMState.cls_uuid
+        ].get_metric()
+        true_agent_state = self._sim.get_agent_state()
+        position_error = np.linalg.norm(
+            orbslam_state["position"] - true_agent_state.position
+        )
+        self._metric = position_error
+
+
+@registry.register_measure
+class ORBSLAMRotationError(Measure):
+    cls_uuid: str = "orbslam_rotation_error"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        super().__init__(**kwargs)
+        self._sim = sim
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMState.cls_uuid]
+        )
+        self.update_metric(episode=episode, task=task, *args, **kwargs)
+
+    def update_metric(
+        self, episode: NavigationEpisode, task, *args: Any, **kwargs: Any
+    ):
+        orbslam_state = task.measurements.measures[
+            ORBSLAMState.cls_uuid
+        ].get_metric()
+        true_agent_state = self._sim.get_agent_state().sensor_states["rgb"]
+        rotation_error = angle_between_quaternions(
+            quaternion.from_float_array(orbslam_state["rotation"]),
+            true_agent_state.rotation,
+        )
+        self._metric = rotation_error
+
+
+@registry.register_measure
+class ORBSLAMPoseError(Measure):
+    cls_uuid: str = "orbslam_pose_error"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        super().__init__(**kwargs)
+        self._sim = sim
+        self.prev_true_agent_pose = None
+        self.prev_orbslam_agent_pose = None
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMState.cls_uuid]
+        )
+        self.prev_true_agent_pose = None
+        self.prev_orbslam_agent_pose = None
+        self.update_metric(episode=episode, task=task, *args, **kwargs)
+
+    def update_metric(
+        self, episode: NavigationEpisode, task, *args: Any, **kwargs: Any
+    ):
+        orbslam_state = task.measurements.measures[
+            ORBSLAMState.cls_uuid
+        ].get_metric()
+
+        orbslam_agent_pose = np.eye(4)
+        orbslam_agent_pose[0:3, -1] = np.array(orbslam_state["position"])
+        orbslam_agent_pose[0:3, 0:3] = quaternion.as_rotation_matrix(
+            quaternion.from_float_array(orbslam_state["rotation"])
+        )
+
+        true_agent_state = self._sim.get_agent_state().sensor_states["rgb"]
+        true_agent_pose = np.eye(4)
+        true_agent_pose[0:3, -1] = np.array(true_agent_state.position)
+        true_agent_pose[0:3, 0:3] = quaternion.as_rotation_matrix(
+            true_agent_state.rotation
+        )
+
+        if self.prev_true_agent_pose is None:
+            self.prev_true_agent_pose = true_agent_pose
+            self.prev_orbslam_agent_pose = orbslam_agent_pose
+
+        rel_true_pose = np.dot(
+            np.linalg.inv(self.prev_true_agent_pose), true_agent_pose
+        )
+        rel_orbslam_pose = np.dot(
+            np.linalg.inv(self.prev_orbslam_agent_pose), orbslam_agent_pose
+        )
+        rpe = np.linalg.norm(
+            np.dot(np.linalg.inv(rel_true_pose), rel_orbslam_pose) - np.eye(4)
+        )
+        self._metric = rpe
+
+        self.prev_true_agent_pose = true_agent_pose
+        self.prev_orbslam_agent_pose = orbslam_agent_pose
+
+
+@registry.register_measure
+class ORBSLAMTopDownMap(Measure):
+    r"""Top Down Map measure"""
+
+    def __init__(
+        self,
+        sim: "HabitatSim",
+        config: "DictConfig",
+        *args: Any,
+        **kwargs: Any,
+    ):
+        self._sim = sim
+        self._config = config
+        self._grid_delta = config.map_padding
+        self._step_count: Optional[int] = None
+        self._map_resolution = config.map_resolution
+        self._ind_x_min: Optional[int] = None
+        self._ind_x_max: Optional[int] = None
+        self._ind_y_min: Optional[int] = None
+        self._ind_y_max: Optional[int] = None
+        self._previous_xy_location: List[Optional[Tuple[int, int]]] = None
+        self._previous_xy_location_orbslam: List[
+            Optional[Tuple[int, int]]
+        ] = None
+        self._top_down_map: Optional[np.ndarray] = None
+        self._shortest_path_points: Optional[List[Tuple[int, int]]] = None
+        self.line_thickness = int(
+            np.round(self._map_resolution * 2 / (MAP_THICKNESS_SCALAR * 2))
+        )
+        self.point_padding = 2 * int(
+            np.ceil(self._map_resolution / MAP_THICKNESS_SCALAR)
+        )
+        super().__init__()
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return "top_down_map"
+
+    def get_original_map(self):
+        top_down_map = maps.get_topdown_map_from_sim(
+            self._sim,
+            map_resolution=self._map_resolution,
+            draw_border=self._config.draw_border,
+        )
+
+        if self._config.fog_of_war.draw:
+            self._fog_of_war_mask = np.zeros_like(top_down_map)
+        else:
+            self._fog_of_war_mask = None
+
+        return top_down_map
+
+    def _draw_point(self, position, point_type):
+        t_x, t_y = maps.to_grid(
+            position[2],
+            position[0],
+            (self._top_down_map.shape[0], self._top_down_map.shape[1]),
+            sim=self._sim,
+        )
+        self._top_down_map[
+            t_x - self.point_padding : t_x + self.point_padding + 1,
+            t_y - self.point_padding : t_y + self.point_padding + 1,
+        ] = point_type
+
+    def _draw_goals_view_points(self, episode):
+        if self._config.draw_view_points:
+            for goal in episode.goals:
+                if self._is_on_same_floor(goal.position[1]):
+                    try:
+                        if goal.view_points is not None:
+                            for view_point in goal.view_points:
+                                self._draw_point(
+                                    view_point.agent_state.position,
+                                    maps.MAP_VIEW_POINT_INDICATOR,
+                                )
+                    except AttributeError:
+                        pass
+
+    def _draw_goals_positions(self, episode):
+        if self._config.draw_goal_positions:
+            for goal in episode.goals:
+                if self._is_on_same_floor(goal.position[1]):
+                    try:
+                        self._draw_point(
+                            goal.position, maps.MAP_TARGET_POINT_INDICATOR
+                        )
+                    except AttributeError:
+                        pass
+
+    def _draw_goals_aabb(self, episode):
+        if self._config.draw_goal_aabbs:
+            for goal in episode.goals:
+                try:
+                    sem_scene = self._sim.semantic_annotations()
+                    object_id = goal.object_id
+                    assert int(
+                        sem_scene.objects[object_id].id.split("_")[-1]
+                    ) == int(
+                        goal.object_id
+                    ), f"Object_id doesn't correspond to id in semantic scene objects dictionary for episode: {episode}"
+
+                    center = sem_scene.objects[object_id].aabb.center
+                    x_len, _, z_len = (
+                        sem_scene.objects[object_id].aabb.sizes / 2.0
+                    )
+                    # Nodes to draw rectangle
+                    corners = [
+                        center + np.array([x, 0, z])
+                        for x, z in [
+                            (-x_len, -z_len),
+                            (-x_len, z_len),
+                            (x_len, z_len),
+                            (x_len, -z_len),
+                            (-x_len, -z_len),
+                        ]
+                        if self._is_on_same_floor(center[1])
+                    ]
+
+                    map_corners = [
+                        maps.to_grid(
+                            p[2],
+                            p[0],
+                            (
+                                self._top_down_map.shape[0],
+                                self._top_down_map.shape[1],
+                            ),
+                            sim=self._sim,
+                        )
+                        for p in corners
+                    ]
+
+                    maps.draw_path(
+                        self._top_down_map,
+                        map_corners,
+                        maps.MAP_TARGET_BOUNDING_BOX,
+                        self.line_thickness,
+                    )
+                except AttributeError:
+                    pass
+
+    def _draw_shortest_path(
+        self, episode: NavigationEpisode, agent_position: AgentState
+    ):
+        if self._config.draw_shortest_path:
+            _shortest_path_points = (
+                self._sim.get_straight_shortest_path_points(
+                    agent_position, episode.goals[0].position
+                )
+            )
+            self._shortest_path_points = [
+                maps.to_grid(
+                    p[2],
+                    p[0],
+                    (self._top_down_map.shape[0], self._top_down_map.shape[1]),
+                    sim=self._sim,
+                )
+                for p in _shortest_path_points
+            ]
+            maps.draw_path(
+                self._top_down_map,
+                self._shortest_path_points,
+                maps.MAP_SHORTEST_PATH_COLOR,
+                self.line_thickness,
+            )
+
+    def _is_on_same_floor(
+        self, height, ref_floor_height=None, ceiling_height=2.0
+    ):
+        if ref_floor_height is None:
+            ref_floor_height = self._sim.get_agent(0).state.position[1]
+        return ref_floor_height <= height < ref_floor_height + ceiling_height
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMState.cls_uuid]
+        )
+        self._top_down_map = self.get_original_map()
+        self._step_count = 0
+        agent_position = self._sim.get_agent_state().position
+        self._previous_xy_location = [
+            None for _ in range(len(self._sim.habitat_config.agents))
+        ]
+        self._previous_xy_location_orbslam = [
+            None for _ in range(len(self._sim.habitat_config.agents))
+        ]
+
+        if hasattr(episode, "goals"):
+            # draw source and target parts last to avoid overlap
+            self._draw_goals_view_points(episode)
+            self._draw_goals_aabb(episode)
+            self._draw_goals_positions(episode)
+            self._draw_shortest_path(episode, agent_position)
+
+        if self._config.draw_source:
+            self._draw_point(
+                episode.start_position, maps.MAP_SOURCE_POINT_INDICATOR
+            )
+
+        self.update_metric(episode, task)
+        self._step_count = 0
+
+    def update_metric(self, episode, task, *args: Any, **kwargs: Any):
+        self._step_count += 1
+        map_positions: List[Tuple[float]] = []
+        map_angles = []
+        orbslam_map_positions = []
+        orbslam_map_angles = []
+        for agent_index in range(len(self._sim.habitat_config.agents)):
+            agent_state = self._sim.get_agent_state(agent_index)
+            map_positions.append(self.update_map(agent_state, agent_index))
+            map_angles.append(TopDownMap.get_polar_angle(agent_state))
+
+            orbslam_state = task.measurements.measures[
+                ORBSLAMState.cls_uuid
+            ].get_metric()
+            orbslam_map_positions.append(
+                self.update_map_orbslam(
+                    AgentState(
+                        orbslam_state["position"],
+                        quaternion.from_float_array(orbslam_state["rotation"]),
+                    ),
+                    agent_index,
+                )
+            )
+            orbslam_map_angles.append(
+                TopDownMap.get_polar_angle(
+                    AgentState(
+                        orbslam_state["position"],
+                        quaternion.from_float_array(orbslam_state["rotation"]),
+                    )
+                )
+            )
+        self._metric = {
+            "map": self._top_down_map,
+            "fog_of_war_mask": self._fog_of_war_mask,
+            "agent_map_coord": map_positions,
+            "agent_angle": map_angles,
+            "orbslam_map_coord": orbslam_map_positions,
+            "orbslam_angle": orbslam_map_angles,
+        }
+
+    @staticmethod
+    def get_polar_angle(agent_state):
+        # quaternion is in x, y, z, w format
+        ref_rotation = agent_state.rotation
+        heading_vector = quaternion_rotate_vector(
+            ref_rotation.inverse(), np.array([0, 0, -1])
+        )
+        phi = cartesian_to_polar(heading_vector[2], -heading_vector[0])[1]
+        return np.array(phi)
+
+    def update_map(self, agent_state: AgentState, agent_index: int):
+        agent_position = agent_state.position
+        a_x, a_y = maps.to_grid(
+            agent_position[2],
+            agent_position[0],
+            (self._top_down_map.shape[0], self._top_down_map.shape[1]),
+            sim=self._sim,
+        )
+        # Don't draw over the source point
+        if self._top_down_map[a_x, a_y] != maps.MAP_SOURCE_POINT_INDICATOR:
+            color = 11 + min(
+                self._step_count * 245 // self._config.max_episode_steps, 245
+            )
+
+            thickness = self.line_thickness
+            if self._previous_xy_location[agent_index] is not None:
+                cv2.line(
+                    self._top_down_map,
+                    self._previous_xy_location[agent_index],
+                    (a_y, a_x),
+                    maps.MAP_TRUE_PATH,
+                    thickness=thickness,
+                )
+        angle = TopDownMap.get_polar_angle(agent_state)
+        self.update_fog_of_war_mask(np.array([a_x, a_y]), angle)
+
+        self._previous_xy_location[agent_index] = (a_y, a_x)
+        return a_x, a_y
+
+    def update_map_orbslam(self, agent_state: AgentState, agent_index: int):
+        agent_position = agent_state.position
+        a_x, a_y = maps.to_grid(
+            agent_position[2],
+            agent_position[0],
+            (self._top_down_map.shape[0], self._top_down_map.shape[1]),
+            sim=self._sim,
+        )
+        # Don't draw over the source point
+        if self._top_down_map[a_x, a_y] != maps.MAP_SOURCE_POINT_INDICATOR:
+            thickness = self.line_thickness
+            if self._previous_xy_location_orbslam[agent_index] is not None:
+                cv2.line(
+                    self._top_down_map,
+                    self._previous_xy_location_orbslam[agent_index],
+                    (a_y, a_x),
+                    maps.MAP_LOCALIZATION_PATH,
+                    thickness=thickness,
+                )
+        angle = TopDownMap.get_polar_angle(agent_state)
+        self.update_fog_of_war_mask(np.array([a_x, a_y]), angle)
+
+        self._previous_xy_location_orbslam[agent_index] = (a_y, a_x)
+        return a_x, a_y
+
+    def update_fog_of_war_mask(self, agent_position, angle):
+        if self._config.fog_of_war.draw:
+            self._fog_of_war_mask = fog_of_war.reveal_fog_of_war(
+                self._top_down_map,
+                self._fog_of_war_mask,
+                agent_position,
+                angle,
+                fov=self._config.fog_of_war.fov,
+                max_line_len=self._config.fog_of_war.visibility_dist
+                / maps.calculate_meters_per_pixel(
+                    self._map_resolution, sim=self._sim
+                ),
+            )
 
 
 @registry.register_measure
@@ -913,7 +1612,7 @@ class TopDownMap(Measure):
                     self._top_down_map,
                     self._previous_xy_location[agent_index],
                     (a_y, a_x),
-                    color,
+                    maps.MAP_TRUE_PATH,
                     thickness=thickness,
                 )
         angle = TopDownMap.get_polar_angle(agent_state)
@@ -1028,7 +1727,9 @@ class DistanceToGoalReward(Measure):
         self._previous_distance = task.measurements.measures[
             DistanceToGoal.cls_uuid
         ].get_metric()
-        self.update_metric(episode=episode, task=task, *args, **kwargs)  # type: ignore
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
 
     def update_metric(
         self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
@@ -1038,6 +1739,160 @@ class DistanceToGoalReward(Measure):
         ].get_metric()
         self._metric = -(distance_to_target - self._previous_distance)
         self._previous_distance = distance_to_target
+
+
+@registry.register_measure
+class ORBSLAMLocalizationReward(Measure):
+    cls_uuid: str = "orbslam_localization_reward"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        super().__init__()
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid,
+            [
+                ORBSLAMPositionError.cls_uuid,
+                ORBSLAMRotationError.cls_uuid,
+            ],
+        )
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
+
+    def update_metric(
+        self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        total_error = task.measurements.measures[ORBSLAMPositionError.cls_uuid].get_metric() + task.measurements.measures[ORBSLAMRotationError.cls_uuid].get_metric() 
+        self._metric = -total_error
+
+
+@registry.register_measure
+class LocalizationAwareDistanceToGoalReward(Measure):
+    cls_uuid: str = "localization_aware_distance_to_goal_reward"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        super().__init__()
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [DistanceToGoalReward.cls_uuid]
+        )
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMLocalizationReward.cls_uuid]
+        )
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMLoopClosureReward.cls_uuid]
+        )
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
+
+    def update_metric(
+        self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        distance_to_goal_reward = task.measurements.measures[
+            DistanceToGoalReward.cls_uuid
+        ].get_metric()
+        localization_reward = task.measurements.measures[
+            ORBSLAMLocalizationReward.cls_uuid
+        ].get_metric()
+        loop_closure_reward = task.measurements.measures[
+            ORBSLAMLoopClosureReward.cls_uuid
+        ].get_metric()
+        self._metric = (
+            distance_to_goal_reward + localization_reward + loop_closure_reward
+        )
+
+
+@registry.register_measure
+class ORBSLAMLoopClosureReward(Measure):
+    cls_uuid: str = "orbslam_loop_closure_reward"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        super().__init__()
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [ORBSLAMState.cls_uuid]
+        )
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
+
+    def update_metric(
+        self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        loop_closure = task.measurements.measures[
+            ORBSLAMState.cls_uuid
+        ].get_metric()["map_changed"]
+        self._metric = (
+            int(loop_closure) * self._config.loop_closure_reward_weight
+        )
+        if loop_closure == True:
+            print(f"Loop Closure Reward: {self._metric}")
+
+
+@registry.register_measure
+class EarlyStoppingPenalty(Measure):
+    cls_uuid: str = "early_stopping_penalty"
+
+    def __init__(
+        self, sim: Simulator, config: "DictConfig", *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        super().__init__()
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def reset_metric(self, episode, task, *args: Any, **kwargs: Any):
+        task.measurements.check_measure_dependencies(
+            self.uuid, [DistanceToGoal.cls_uuid]
+        )
+        self.update_metric(
+            episode=episode, task=task, *args, **kwargs
+        )  # type: ignore
+
+    def update_metric(
+        self, episode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        distance_to_goal = task.measurements.measures[
+            DistanceToGoal.cls_uuid
+        ].get_metric()
+
+        if (
+            task.is_stop_called
+            and distance_to_goal
+            > task._config.measurements.success.success_distance
+        ):
+            self._metric = self._config.penalty
+            if self._config.prevent_termination:
+                task.is_stop_called = False
+        else:
+            self._metric = 0.0
 
 
 @registry.register_task_action
@@ -1169,7 +2024,9 @@ class VelocityAction(SimulatorTaskAction):
         self.min_abs_lin_speed = config.min_abs_lin_speed
         self.min_abs_ang_speed = config.min_abs_ang_speed
         self.time_step = config.time_step
-        self._allow_sliding = self._sim.config.sim_cfg.allow_sliding  # type: ignore
+        self._allow_sliding = (
+            self._sim.config.sim_cfg.allow_sliding
+        )  # type: ignore
 
     @property
     def action_space(self):
@@ -1217,17 +2074,17 @@ class VelocityAction(SimulatorTaskAction):
         if time_step is None:
             time_step = self.time_step
 
-        # Convert from [-1, 1] to [0, 1] range
-        linear_velocity = (linear_velocity + 1.0) / 2.0
-        angular_velocity = (angular_velocity + 1.0) / 2.0
+        # # Convert from [-1, 1] to [0, 1] range
+        # linear_velocity = (linear_velocity + 1.0) / 2.0
+        # angular_velocity = (angular_velocity + 1.0) / 2.0
 
-        # Scale actions
-        linear_velocity = self.min_lin_vel + linear_velocity * (
-            self.max_lin_vel - self.min_lin_vel
-        )
-        angular_velocity = self.min_ang_vel + angular_velocity * (
-            self.max_ang_vel - self.min_ang_vel
-        )
+        # # Scale actions
+        # linear_velocity = self.min_lin_vel + linear_velocity * (
+        #     self.max_lin_vel - self.min_lin_vel
+        # )
+        # angular_velocity = self.min_ang_vel + angular_velocity * (
+        #     self.max_ang_vel - self.min_ang_vel
+        # )
 
         # Stop is called if both linear/angular speed are below their threshold
         if (
@@ -1238,10 +2095,10 @@ class VelocityAction(SimulatorTaskAction):
             return self._sim.get_observations_at(position=None, rotation=None)
 
         angular_velocity = np.deg2rad(angular_velocity)
-        self.vel_control.linear_velocity = np.array(
+        self.vel_control.linear_velocity = mn.Vector3(
             [0.0, 0.0, -linear_velocity]
         )
-        self.vel_control.angular_velocity = np.array(
+        self.vel_control.angular_velocity = mn.Vector3(
             [0.0, angular_velocity, 0.0]
         )
         agent_state = self._sim.get_agent_state()
@@ -1251,10 +2108,7 @@ class VelocityAction(SimulatorTaskAction):
         agent_mn_quat = mn.Quaternion(
             normalized_quaternion.imag, normalized_quaternion.real
         )
-        current_rigid_state = RigidState(
-            agent_mn_quat,
-            agent_state.position,
-        )
+        current_rigid_state = RigidState(agent_mn_quat, agent_state.position)
 
         # manually integrate the rigid state
         goal_rigid_state = self.vel_control.integrate_transform(

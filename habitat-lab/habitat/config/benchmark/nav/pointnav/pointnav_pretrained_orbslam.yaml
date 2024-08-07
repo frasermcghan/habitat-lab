@@ -1,0 +1,50 @@
+# @package _global_
+
+defaults:
+  - pointnav_base
+  - /habitat/dataset/pointnav: gibson
+  - override /habitat/task: pointnav_custom_continuous_orbslam
+  - override /habitat/simulator/agents@habitat.simulator.agents.main_agent: rgbd_agent
+  - _self_
+
+habitat:
+  dataset:
+    split: train
+    data_path: /mnt/habitat_datasets/datasets/pointnav/gibson/v2/{split}/{split}.json.gz
+    scenes_dir: /mnt/habitat_datasets/scene_datasets/
+  environment:
+    iterator_options:
+      shuffle: True
+      group_by_scene: True
+    max_episode_steps: 1000
+  simulator:
+    habitat_sim_v0:
+      gpu_device_id: 0
+      allow_sliding: True
+    agents:
+      main_agent:
+        height: 0.61
+        radius: 0.175
+        sim_sensors:
+          rgb_sensor:
+            hfov: 90
+            width: 256
+            height: 256
+          depth_sensor:
+            hfov: 90
+            width: 256
+            height: 256
+  task:
+    slack_reward: 0.0
+    success_reward: 10.0
+    reward_measure: "distance_to_goal_reward"
+    goal_sensor_uuid: pointgoal_with_gps_compass
+    measurements:
+      orbslam_state:
+        vocabulary_file: "/mnt/orb_vocabulary.txt"
+        settings_file: "/mnt/orb_settings.yaml"
+
+  gym:
+    obs_keys:
+      - depth
+      - pointgoal_with_gps_compass

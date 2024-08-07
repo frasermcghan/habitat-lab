@@ -16,6 +16,8 @@ class RunningMeanAndVar(nn.Module):
         assert n_channels > 0
         self.register_buffer("_mean", torch.zeros(1, n_channels, 1, 1))
         self.register_buffer("_var", torch.zeros(1, n_channels, 1, 1))
+        # self.register_buffer("_mean", torch.zeros(1, n_channels))
+        # self.register_buffer("_var", torch.zeros(1, n_channels))
         self.register_buffer("_count", torch.zeros(()))
         self._mean: torch.Tensor = self._mean
         self._var: torch.Tensor = self._var

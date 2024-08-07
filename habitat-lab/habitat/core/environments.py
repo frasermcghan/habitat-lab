@@ -19,6 +19,11 @@ import numpy as np
 import habitat
 from habitat import Dataset
 from habitat.gym.gym_wrapper import HabGymWrapper
+from habitat.config.read_write import read_write
+from habitat.config.default_structured_configs import (
+    TopDownMapMeasurementConfig,
+    ORBSLAMTopDownMapMeasurementConfig,
+)
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -122,4 +127,70 @@ class GymHabitatEnv(gym.Wrapper):
     ):
         base_env = RLTaskEnv(config=config, dataset=dataset)
         env = HabGymWrapper(env=base_env)
+        super().__init__(env)
+
+
+class FrameSkipWrapper(gym.Wrapper):
+    def __init__(self, env: gym.Env, n_frames: int = 1):
+        super().__init__(env)
+        self.n_frames = n_frames
+
+    def step(self, action):
+        total_reward = 0.0
+        n_skipped = 0
+        while n_skipped < self.n_frames:
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            n_skipped += 1
+            if done:
+                break
+        return obs, total_reward, done, info
+
+
+class DiscreteActionWrapper(gym.ActionWrapper):
+    def __init__(self, env, forward_metres=0.25, turn_degrees=30):
+        super().__init__(env)
+        self.action_space = gym.spaces.Discrete(4)
+        self.disc_to_cont = [
+            np.array([0.0, 0.0], dtype=np.float32),
+            np.array([0.0, forward_metres], dtype=np.float32),
+            np.array([turn_degrees, 0.0], dtype=np.float32),
+            np.array([-turn_degrees, 0.0], dtype=np.float32),
+        ]
+
+    def action(self, act):
+        return self.disc_to_cont[act]
+
+
+class LocNavWrapper(HabGymWrapper):
+    def __init__(self, env: gym.Env):
+        super().__init__(env)
+
+    def _direct_hab_step(self, action):
+        obs, reward, done, info = self.env.step(action=action)
+        if "orbslam_pointgoal_with_gps_compass_transformed" in obs:
+            obs["pointgoal_with_gps_compass"] = obs[
+                "orbslam_pointgoal_with_gps_compass_transformed"
+            ]
+        self._last_obs = obs
+        obs = self._transform_obs(obs)
+        return obs, reward, done, info
+
+
+@habitat.registry.register_env(name="LocNavEnv")
+class LocNavEnv(gym.Wrapper):
+    def __init__(self, config, dataset=None):
+        env = RLTaskEnv(config=config, dataset=dataset)
+        env = LocNavWrapper(env)
+        env = FrameSkipWrapper(env, n_frames=10)
+        env = DiscreteActionWrapper(env, turn_degrees=10)
+        super().__init__(env)
+
+
+@habitat.registry.register_env(name="LocNavEnvContinuous")
+class LocNavEnvContinuous(gym.Wrapper):
+    def __init__(self, config, dataset):
+        env = RLTaskEnv(config=config, dataset=dataset)
+        env = LocNavWrapper(env)
+        env = FrameSkipWrapper(env, n_frames=10)
         super().__init__(env)

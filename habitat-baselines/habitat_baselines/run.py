@@ -3,6 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import random
 import sys
 from typing import TYPE_CHECKING
@@ -57,7 +58,10 @@ def execute_exp(config: "DictConfig", run_type: str) -> None:
     trainer = trainer_init(config)
 
     if run_type == "train":
-        trainer.train()
+        try:
+            trainer.train()
+        except:
+            os._exit(1)
     elif run_type == "eval":
         trainer.eval()
 
